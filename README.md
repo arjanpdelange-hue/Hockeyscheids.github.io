@@ -1,2 +1,2 @@
-# Hockeyscheids.github.io
+# Hockeyscheids
 Hockeuscheiderrev
