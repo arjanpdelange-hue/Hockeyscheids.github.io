@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#4f46e5"> <title>Hockey Arbitrage App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.23/jspdf.plugin.autotable.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        :root {
+            --home-color: #800000; /* Bordeaux Rood voor BMHV */
+            --away-color: #3b82f6; /* Blauw voor Gastteam */
+            --green: #22c55e;
+            --yellow: #facc15; 
+            --red: #ef4444;
+            --field-color: #a8e0a8; /* Lichtgroen veld (niet gebruikt, maar voor consistentie) */
+            --line-color: #ffffff; /* Witte lijnen (niet gebruikt, maar voor consistentie) */
+        }
+        /* Kleinere padding op body voor full screen mobiele look */
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #f3f4f6;
+            padding: 0.5rem; /* Minder padding op mobiel */
+        }
+        .card-btn {
+            display: flex;
+            flex-direction: column; 
+            align-items: center;
+            justify-content: center;
+            height: 6rem;
+            width: 100%;
+            font-weight: bold;
+            background-color: white;
+            transition: transform 0.1s;
+        }
+        .card-btn:active { transform: scale(0.95); }
+        .card-shape { font-size: 2rem; width: 2.5rem; height: 2.5rem; }
+        
+        .green-triangle { clip-path: polygon(50% 0%, 0% 100%, 100% 100%); background-color: var(--green); }
+        .yellow-square-5, .yellow-square-10 { background-color: var(--yellow); }
+        .red-circle { border-radius: 50%; background-color: var(--red); }
+
+        .score-btn {
+            background-color: var(--away-color);
+            color: white;
+            font-weight: bold;
+            padding: 0.75rem 0;
+            border-radius: 0.5rem;
+            transition: background-color 0.1s;
+        }
+        .score-btn:hover { background-color: #306bd1; }
+
+        /* Custom kleuren voor teamnamen en score */
+        .home-team-text { color: var(--home-color); }
+        .away-team-text { color: var(--away-color); }
+
+        .active-timer {
+            animation: pulse-red 1s infinite alternate;
+        }
+        @keyframes pulse-red {
+            from { box-shadow: 0 0 0px var(--red); }
+            to { box-shadow: 0 0 10px var(--red); }
+        }
+        .paused-state {
+            background-color: #fef3c7; 
+        }
+    </style>
+</head>
+<body class="p-2 sm:p-6">
+
+    <div id="app" class="w-full max-w-4xl mx-auto bg-white shadow-xl rounded-xl p-4 sm:p-6 space-y-6">
+
+        <h1 class="text-3xl font-extrabold text-center text-gray-800 mb-6">Veldhockey</h1>
+
+        <div class="flex items-center justify-between space-x-2 text-center">
+            <div class="w-5/12">
+                <input id="home-team-input" value="BMHV" class="w-full text-lg sm:text-2xl font-bold p-1 rounded-lg home-team-text bg-red-50 border-2 border-red-200 text-center" onchange="updateTeamName('home', this.value)">
+                <p id="home-score" class="text-5xl font-black home-team-text mt-1 sm:text-7xl">0</p>
+            </div>
+            <div class="text-4xl font-extrabold text-gray-400 w-2/12">-</div>
+            <div class="w-5/12">
+                <input id="away-team-input" value="Gastteam" class="w-full text-lg sm:text-2xl font-bold p-1 rounded-lg away-team-text bg-blue-50 border-2 border-blue-200 text-center" onchange="updateTeamName('away', this.value)">
+                <p id="away-score" class="text-5xl font-black away-team-text mt-1 sm:text-7xl">0</p>
+            </div>
+        </div>
+
+        <div class="bg-indigo-600 text-white p-4 sm:p-6 rounded-lg text-center shadow-lg">
+            <p id="quarter-display" class="text-xl sm:text-2xl font-bold">1e Kwart</p>
+            <p id="match-timer" class="text-7xl sm:text-9xl font-extrabold my-2">17:30</p>
+        </div>
+
+        <div class="flex justify-center">
+            <button onclick="startPauseMatch()" id="start-pause-btn" class="w-full max-w-xs bg-green-500 hover:bg-green-600 text-white text-2xl font-bold py-3 px-6 rounded-lg shadow-md transition">Start Wedstrijd</button>
+        </div>
+
+        <div class="p-4 rounded-lg border-2 border-blue-200 bg-blue-50">
+            <h2 class="text-xl font-bold mb-3 text-blue-700">Actieve Kaarten</h2>
+            <div class="flex flex-col sm:flex-row justify-between gap-4">
+                <div class="w-full sm:w-1/2">
+                    <h3 class="font-bold home-team-text text-lg mb-1" id="active-cards-home-label">BMHV (Thuis)</h3>
+                    <div id="home-active-cards-container" class="space-y-2">
+                        <p class="text-gray-500" id="no-home-cards">Geen actieve straffen.</p>
+                    </div>
+                </div>
+                <div class="w-full sm:w-1/2">
+                    <h3 class="font-bold away-team-text text-lg mb-1" id="active-cards-away-label">Gastteam (Uit)</h3>
+                    <div id="away-active-cards-container" class="space-y-2">
+                        <p class="text-gray-500" id="no-away-cards">Geen actieve straffen.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 rounded-lg border-2 border-gray-200">
+            <h2 class="text-xl font-bold mb-3 text-gray-700">Kaart Toekennen</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <p class="font-semibold text-center home-team-text" id="home-card-label">BMHV</p>
+                    <button onclick="prepareEvent('card', 'home', 'groen')" class="card-btn text-green-700 border-2 border-green-500 rounded-lg shadow-sm">
+                        <div class="card-shape green-triangle"></div>
+                        <span class="text-sm font-semibold mt-1">2 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'home', 'geel_5')" class="card-btn text-yellow-700 border-2 border-yellow-500 rounded-lg shadow-sm">
+                        <div class="card-shape yellow-square-5 rounded-lg"></div>
+                        <span class="text-sm font-semibold mt-1">5 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'home', 'geel_10')" class="card-btn text-yellow-700 border-2 border-yellow-500 rounded-lg shadow-sm">
+                        <div class="card-shape yellow-square-10 rounded-lg"></div>
+                        <span class="text-sm font-semibold mt-1">10 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'home', 'rood')" class="card-btn text-red-700 border-2 border-red-500 rounded-lg shadow-sm">
+                        <div class="card-shape red-circle"></div>
+                        <span class="text-sm font-semibold mt-1">Rood</span>
+                    </button>
+                </div>
+                <div class="space-y-2">
+                    <p class="font-semibold text-center away-team-text" id="away-card-label">Gastteam</p>
+                    <button onclick="prepareEvent('card', 'away', 'groen')" class="card-btn text-green-700 border-2 border-green-500 rounded-lg shadow-sm">
+                        <div class="card-shape green-triangle"></div>
+                        <span class="text-sm font-semibold mt-1">2 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'away', 'geel_5')" class="card-btn text-yellow-700 border-2 border-yellow-500 rounded-lg shadow-sm">
+                        <div class="card-shape yellow-square-5 rounded-lg"></div>
+                        <span class="text-sm font-semibold mt-1">5 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'away', 'geel_10')" class="card-btn text-yellow-700 border-2 border-yellow-500 rounded-lg shadow-sm">
+                        <div class="card-shape yellow-square-10 rounded-lg"></div>
+                        <span class="text-sm font-semibold mt-1">10 min</span>
+                    </button>
+                    <button onclick="prepareEvent('card', 'away', 'rood')" class="card-btn text-red-700 border-2 border-red-500 rounded-lg shadow-sm">
+                        <div class="card-shape red-circle"></div>
+                        <span class="text-sm font-semibold mt-1">Rood</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 rounded-lg border-2 border-gray-200">
+            <h2 class="text-xl font-bold mb-3 text-gray-700">Doelpunt Toekennen</h2>
+            <div class="grid grid-cols-2 gap-4">
+                <div class="space-y-2">
+                    <p class="font-semibold text-center home-team-text" id="home-team-label-goal">BMHV</p>
+                    <button onclick="prepareEvent('goal', 'home', 'strafcorner')" class="score-btn w-full bg-[#800000] hover:bg-[#6b0000]">Strafcorner</button>
+                    <button onclick="prepareEvent('goal', 'home', 'velddoelpunt')" class="score-btn w-full bg-[#800000] hover:bg-[#6b0000]">Velddoelpunt</button>
+                    <button onclick="prepareEvent('goal', 'home', 'strafbal')" class="score-btn w-full bg-[#800000] hover:bg-[#6b0000]">Strafbal</button>
+                </div>
+                <div class="space-y-2">
+                    <p class="font-semibold text-center away-team-text" id="away-team-label-goal">Gastteam</p>
+                    <button onclick="prepareEvent('goal', 'away', 'strafcorner')" class="score-btn w-full bg-[#3b82f6] hover:bg-[#1d4ed8]">Strafcorner</button>
+                    <button onclick="prepareEvent('goal', 'away', 'velddoelpunt')" class="score-btn w-full bg-[#3b82f6] hover:bg-[#1d4ed8]">Velddoelpunt</button>
+                    <button onclick="prepareEvent('goal', 'away', 'strafbal')" class="score-btn w-full bg-[#3b82f6] hover:bg-[#1d4ed8]">Strafbal</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="p-4 rounded-lg border-2 border-gray-200 bg-gray-50">
+            <h2 class="text-xl font-bold mb-3 text-gray-700">Wedstrijd Tijdlijn</h2>
+            <div id="timeline-container" class="space-y-3 max-h-60 overflow-y-auto">
+                <p class="text-gray-500">Tijdlijn van de wedstrijdgebeurtenissen.</p>
+            </div>
+        </div>
+        
+        <div class="flex justify-center pt-2">
+            <button onclick="generatePdf()" id="download-pdf-btn" class="w-full max-w-xs bg-indigo-600 hover:bg-indigo-700 text-white text-lg font-bold py-3 px-6 rounded-lg shadow-md transition hidden">Download Tijdlijn (PDF)</button>
+        </div>
+
+        <div class="flex justify-center pt-2 mb-2">
+            <button onclick="showResetConfirmation()" class="w-full max-w-xs bg-red-600 hover:bg-red-700 text-white text-lg font-bold py-3 px-6 rounded-lg shadow-md transition">Reset Wedstrijd</button>
+        </div>
+        
+        <div class="flex justify-center pt-2 mb-2">
+            <button onclick="undoLastGoal()" class="w-full max-w-xs bg-yellow-500 hover:bg-yellow-600 text-white text-lg font-bold py-3 px-6 rounded-lg shadow-md transition">Laatste Doelpunt Ongedaan Maken</button>
+        </div>
+        
+        <div class="flex justify-center pt-2 mb-6">
+            <button onclick="showConfigModal()" class="w-full max-w-xs bg-indigo-500 hover:bg-indigo-600 text-white text-lg font-bold py-3 px-6 rounded-lg shadow-md transition">Wedstrijd Instellingen</button>
+        </div>
+    </div>
+
+    <div id="message-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm">
+            <h3 id="modal-title" class="text-lg font-bold mb-2">Melding</h3>
+            <p id="modal-message" class="mb-4 text-gray-700"></p>
+            <button onclick="closeModal('message-modal')" class="w-full bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">OK</button>
+        </div>
+    </div>
+
+    <div id="event-input-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm">
+            <h3 id="input-modal-title" class="text-xl font-bold mb-4">Voer Rugnummer In</h3>
+            
+            <p id="input-modal-description" class="mb-4 text-gray-700"></p>
+            
+            <input type="number" id="rugnummer-input" class="w-full p-3 border-2 border-indigo-300 rounded-lg text-2xl text-center mb-6" placeholder="Rugnummer">
+            
+            <div class="flex space-x-4">
+                <button onclick="closeModal('event-input-modal')" class="w-1/2 bg-gray-300 text-gray-800 py-2 rounded-lg hover:bg-gray-400">Annuleer</button>
+                <button onclick="handleEventConfirm()" class="w-1/2 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">Bevestig</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="reset-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm">
+            <h3 class="text-xl font-bold mb-2 text-red-600">Bevestig Reset</h3>
+            <p class="mb-6 text-gray-700">Weet u zeker dat u de hele wedstrijd wilt resetten? Alle scores, kaarten en de tijdlijn gaan verloren.</p>
+            
+            <div class="flex space-x-4">
+                <button onclick="closeModal('reset-modal')" class="w-1/2 bg-gray-300 text-gray-800 py-2 rounded-lg hover:bg-gray-400">Annuleer</button>
+                <button onclick="resetMatch()" class="w-1/2 bg-red-600 text-white py-2 rounded-lg hover:bg-red-700">Reset</button>
+            </div>
+        </div>
+    </div>
+    
+    <div id="config-modal" class="fixed inset-0 bg-gray-600 bg-opacity-75 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white p-6 rounded-lg shadow-2xl w-full max-w-sm">
+            <h3 class="text-xl font-bold mb-4 text-indigo-700">Wedstrijd Instellingen</h3>
+            
+            <div class="mb-4">
+                <label for="quarter-count-input" class="block text-sm font-medium text-gray-700 mb-1">Aantal Kwarten (1-4):</label>
+                <input type="number" id="quarter-count-input" min="1" max="4" value="4" class="w-full p-3 border-2 border-indigo-300 rounded-lg text-lg text-center">
+            </div>
+
+            <div class="mb-6">
+                <label for="quarter-duration-min-input" class="block text-sm font-medium text-gray-700 mb-1">Tijd per Kwart (MM:SS):</label>
+                <div class="flex space-x-2">
+                    <input type="number" id="quarter-duration-min-input" min="1" max="60" value="17" class="w-1/2 p-3 border-2 border-indigo-300 rounded-lg text-lg text-center" placeholder="Minuten">
+                    <input type="number" id="quarter-duration-sec-input" min="0" max="59" value="30" class="w-1/2 p-3 border-2 border-indigo-300 rounded-lg text-lg text-center" placeholder="Seconden">
+                </div>
+            </div>
+
+            <div class="flex space-x-4">
+                <button onclick="closeModal('config-modal')" class="w-1/2 bg-gray-300 text-gray-800 py-2 rounded-lg hover:bg-gray-400">Annuleer</button>
+                <button onclick="saveConfig()" class="w-1/2 bg-indigo-600 text-white py-2 rounded-lg hover:bg-indigo-700">Opslaan</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // --- CONSTANTEN & STATE ---
+        // Standaardwaarden, deze worden nu in 'state' beheerd voor configuratie
+        const DEFAULT_DURATION_SECONDS = 17 * 60 + 30; // 17:30 minuten
+        const CARD_TIMES = {
+            'groen': 120,    // 2 minuten
+            'geel_5': 300,  // 5 minuten
+            'geel_10': 600 // 10 minuten
+        };
+        const SIGNAL_COUNTS = {
+            'groen': 2,
+            'geel_5': 5,
+            'geel_10': 10
+        };
+
+        let state = {
+            quarter: 1,
+            matchTimeSeconds: DEFAULT_DURATION_SECONDS,
+            isRunning: false,
+            matchTimerInterval: null,
+            teams: {
+                home: { name: 'BMHV', color: 'home-team-text', score: 0, buttonColor: '#800000' },
+                away: { name: 'Gastteam', color: 'away-team-text', score: 0, buttonColor: '#3b82f6' }
+            },
+            activeCards: [], 
+            timeline: [], 
+            pauseStartTime: null,
+            pendingEvent: null,
+            // NIEUWE CONFIGURATIE STATE
+            quarterCount: 4, 
+            defaultQuarterDuration: DEFAULT_DURATION_SECONDS // 1050 seconds (17:30)
+        };
+
+        const QUARTER_NAMES = {
+            1: '1e Kwart',
+            2: '2e Kwart',
+            3: '3e Kwart',
+            4: '4e Kwart'
+        };
+
+        // --- DOM ELEMENTEN ---
+        const dom = {
+            matchTimer: document.getElementById('match-timer'),
+            quarterDisplay: document.getElementById('quarter-display'),
+            homeScore: document.getElementById('home-score'),
+            awayScore: document.getElementById('away-score'),
+            homeTeamLabelGoal: document.getElementById('home-team-label-goal'),
+            awayTeamLabelGoal: document.getElementById('away-team-label-goal'),
+            homeActiveCardsContainer: document.getElementById('home-active-cards-container'),
+            awayActiveCardsContainer: document.getElementById('away-active-cards-container'),
+            noHomeCards: document.getElementById('no-home-cards'),
+            noAwayCards: document.getElementById('no-away-cards'),
+            timelineContainer: document.getElementById('timeline-container'),
+            startPauseBtn: document.getElementById('start-pause-btn'),
+            homeTeamInput: document.getElementById('home-team-input'),
+            awayTeamInput: document.getElementById('away-team-input'),
+            activeCardsHomeLabel: document.getElementById('active-cards-home-label'),
+            activeCardsAwayLabel: document.getElementById('active-cards-away-label'),
+            app: document.getElementById('app'),
+            
+            // Modal elementen
+            messageModal: document.getElementById('message-modal'),
+            eventInputModal: document.getElementById('event-input-modal'),
+            inputModalDescription: document.getElementById('input-modal-description'),
+            rugnummerInput: document.getElementById('rugnummer-input'),
+            resetModal: document.getElementById('reset-modal'),
+            downloadPdfBtn: document.getElementById('download-pdf-btn'),
+            
+            // NIEUWE CONFIG ELEMENTEN
+            configModal: document.getElementById('config-modal'),
+            quarterCountInput: document.getElementById('quarter-count-input'),
+            quarterDurationMinInput: document.getElementById('quarter-duration-min-input'),
+            quarterDurationSecInput: document.getElementById('quarter-duration-sec-input')
+        };
+
+
+        // --- HULPFUNCTIES ---
+
+        /** Formatteert seconden naar MM:SS */
+        function formatTime(totalSeconds) {
+            const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
+            const seconds = Math.floor(Math.max(0, totalSeconds) % 60);
+            return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+        }
+
+        /** Formatteert timestamp naar Nederlandse datum en tijd */
+        function formatAbso
